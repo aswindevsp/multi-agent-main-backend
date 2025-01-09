@@ -10,10 +10,7 @@ import (
 	"time"
 )
 
-type Client struct {
-	BaseURL    string
-	HTTPClient *http.Client
-}
+type ClientOption func(*Client)
 
 type GenerateRequest struct {
 	Model       string                 `json:"model"`
@@ -37,26 +34,42 @@ type ErrorResponse struct {
 	Code  int    `json:"code,omitempty"`
 }
 
-func NewClient(baseURL string) *Client {
-	return &Client{
-		BaseURL: baseURL,
-		HTTPClient: &http.Client{
-			Timeout: time.Second * 30,
+type Client struct {
+	baseURL    string
+	httpClient *http.Client
+	timeout    time.Duration
+}
+
+// WithTimeout sets custom timeout
+func WithTimeout(timeout time.Duration) ClientOption {
+	return func(c *Client) {
+		c.timeout = timeout
+		c.httpClient.Timeout = timeout
+	}
+}
+
+// NewClient creates a new Ollama client with options
+func NewClient(baseURL string, opts ...ClientOption) *Client {
+	c := &Client{
+		baseURL: baseURL,
+		timeout: 30 * time.Second,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
 		},
 	}
-}
 
-func (c *Client) Generate(ctx context.Context, model string, prompt string) (*GenerateResponse, error) {
-	req := GenerateRequest{
-		Model:       model,
-		Prompt:      prompt,
-		Temperature: 0.7,
-		MaxTokens:   2048,
+	for _, opt := range opts {
+		opt(c)
 	}
-	return c.GenerateWithOptions(ctx, req)
+
+	return c
 }
 
-func (c *Client) GenerateWithOptions(ctx context.Context, req GenerateRequest) (*GenerateResponse, error) {
+func (c *Client) Generate(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
+	if err := c.validateRequest(req); err != nil {
+		return nil, fmt.Errorf("invalid request: %w", err)
+	}
+
 	jsonData, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -65,83 +78,49 @@ func (c *Client) GenerateWithOptions(ctx context.Context, req GenerateRequest) (
 	httpReq, err := http.NewRequestWithContext(
 		ctx,
 		"POST",
-		c.BaseURL+"/api/generate",
+		c.baseURL+"/api/generate",
 		bytes.NewBuffer(jsonData),
 	)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.HTTPClient.Do(httpReq)
+	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
 	if resp.StatusCode != http.StatusOK {
-		var errResp ErrorResponse
-		if err := json.Unmarshal(body, &errResp); err != nil {
-			return nil, fmt.Errorf("unknown error: status=%d body=%s", resp.StatusCode, string(body))
-		}
-		return nil, fmt.Errorf("api error: %s", errResp.Error)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error: status=%d, body=%s", resp.StatusCode, string(body))
 	}
 
 	var result GenerateResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
-
+	fmt.Printf(result.Content)
 	return &result, nil
 }
 
-func (c *Client) StreamGenerate(ctx context.Context, req GenerateRequest, callback func(*GenerateResponse) error) error {
-	req.Stream = true
-	jsonData, err := json.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
+func (c *Client) validateRequest(req *GenerateRequest) error {
+	if req == nil {
+		return fmt.Errorf("request cannot be nil")
 	}
-
-	httpReq, err := http.NewRequestWithContext(
-		ctx,
-		"POST",
-		c.BaseURL+"/api/generate",
-		bytes.NewBuffer(jsonData),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+	if req.Prompt == "" {
+		return fmt.Errorf("prompt cannot be empty")
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.HTTPClient.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
+	if req.Model == "" {
+		req.Model = "llama3.2"
 	}
-	defer resp.Body.Close()
-
-	decoder := json.NewDecoder(resp.Body)
-	for {
-		var response GenerateResponse
-		if err := decoder.Decode(&response); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return fmt.Errorf("failed to decode response: %w", err)
-		}
-
-		if err := callback(&response); err != nil {
-			return fmt.Errorf("callback error: %w", err)
-		}
-
-		if response.Done {
-			break
-		}
+	if req.Temperature == 0 {
+		req.Temperature = 0.7 // Set default temperature
 	}
-
+	if req.MaxTokens == 0 {
+		req.MaxTokens = 2048 // Set default max tokens
+	}
 	return nil
 }

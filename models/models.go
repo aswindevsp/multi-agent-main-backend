@@ -14,9 +14,10 @@ type Employee struct {
 	Name      string       `json:"name"`
 	Email     string       `json:"email"`
 	Role      EmployeeRole `json:"role"`
+	Skills    []string     `json:"skills,omitempty"`
 	CreatedAt time.Time    `json:"created_at"`
 	Projects  []Project    `json:"projects,omitempty"`
-	Tasks     []Task       `json:"tasks,omitempty`
+	Tasks     []Task       `json:"tasks,omitempty"`
 }
 
 type Project struct {

@@ -21,7 +21,6 @@ func main() {
 	}
 	defer conn.Close(context.Background())
 
-	// Initialize Ollama client
 	// ollamaClient := ollama.NewClient("http://localhost:11434")
 	employeeHandler := handlers.NewEmployeeHandler(conn)
 	projectHandler := handlers.NewProjectHandler(conn)
@@ -55,6 +54,9 @@ func main() {
 	router.HandleFunc("/tasks/{id}", taskHandler.UpdateTask).Methods("PUT")
 	router.HandleFunc("/tasks/{id}", taskHandler.DeleteTask).Methods("DELETE")
 
+	// router.HandleFunc("/projects/{id}/generate-tasks", llmHandler.CreateProjectTasks).Methods("POST")
+
 	fmt.Println("Server starting on port 8888...")
 	http.ListenAndServe(":8888", router)
+
 }

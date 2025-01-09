@@ -27,9 +27,9 @@ func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request)
 	}
 
 	query := `
-        INSERT INTO employees (name, email, role)
-        VALUES ($1, $2, $3)
-        RETURNING id, name, email, role, created_at`
+        INSERT INTO employees (name, email, role, skills)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, name, email, role, skills, created_at`
 
 	err := h.db.QueryRow(
 		context.Background(),
@@ -37,11 +37,13 @@ func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request)
 		employee.Name,
 		employee.Email,
 		employee.Role,
+		employee.Skills,
 	).Scan(
 		&employee.ID,
 		&employee.Name,
 		&employee.Email,
 		&employee.Role,
+		&employee.Skills,
 		&employee.CreatedAt,
 	)
 
@@ -63,7 +65,7 @@ func (h *EmployeeHandler) GetEmployeeById(w http.ResponseWriter, r *http.Request
 
 	var employee models.Employee
 	query := `
-        SELECT id, name, email, role, created_at
+        SELECT id, name, email, role, skills, created_at
         FROM employees
         WHERE id = $1`
 
@@ -72,6 +74,7 @@ func (h *EmployeeHandler) GetEmployeeById(w http.ResponseWriter, r *http.Request
 		&employee.Name,
 		&employee.Email,
 		&employee.Role,
+		&employee.Skills,
 		&employee.CreatedAt,
 	)
 
@@ -89,7 +92,7 @@ func (h *EmployeeHandler) GetEmployeeById(w http.ResponseWriter, r *http.Request
 
 func (h *EmployeeHandler) GetAllEmployees(w http.ResponseWriter, r *http.Request) {
 	query := `
-        SELECT id, name, email, role, created_at
+        SELECT id, name, email, role, skills, created_at,
         FROM employees`
 
 	rows, err := h.db.Query(context.Background(), query)
@@ -107,6 +110,7 @@ func (h *EmployeeHandler) GetAllEmployees(w http.ResponseWriter, r *http.Request
 			&emp.Name,
 			&emp.Email,
 			&emp.Role,
+			&emp.Skills,
 			&emp.CreatedAt,
 		)
 		if err != nil {
@@ -135,9 +139,9 @@ func (h *EmployeeHandler) UpdateEmployee(w http.ResponseWriter, r *http.Request)
 
 	query := `
         UPDATE employees
-        SET name = $1, email = $2, role = $3
-        WHERE id = $4
-        RETURNING id, name, email, role, created_at`
+        SET name = $1, email = $2, role = $3, skills = $4
+        WHERE id = $5
+        RETURNING id, name, email, role, skills, created_at`
 
 	err = h.db.QueryRow(
 		context.Background(),
@@ -145,12 +149,14 @@ func (h *EmployeeHandler) UpdateEmployee(w http.ResponseWriter, r *http.Request)
 		employee.Name,
 		employee.Email,
 		employee.Role,
+		employee.Skills,
 		id,
 	).Scan(
 		&employee.ID,
 		&employee.Name,
 		&employee.Email,
 		&employee.Role,
+		&employee.Skills,
 		&employee.CreatedAt,
 	)
 
@@ -165,7 +171,6 @@ func (h *EmployeeHandler) UpdateEmployee(w http.ResponseWriter, r *http.Request)
 
 	json.NewEncoder(w).Encode(employee)
 }
-
 func (h *EmployeeHandler) DeleteEmployee(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
