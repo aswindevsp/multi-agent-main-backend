@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -18,6 +19,7 @@ type ProjectHandler struct {
 func NewProjectHandler(db *pgx.Conn) *ProjectHandler {
 	return &ProjectHandler{db: db}
 }
+
 func (h *ProjectHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	var project models.Project
@@ -26,6 +28,7 @@ func (h *ProjectHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Println(project.LeadID)
 	query := `
         INSERT INTO projects (name, description, lead_id)
         VALUES ($1, $2, $3)
@@ -46,7 +49,8 @@ func (h *ProjectHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(project)
 }
 
-func (h *ProjectHandler) DeleteProject(w http.ResponseWriter, r *http.Request) {
+// GetProjectByID retrieves a project by its ID
+func (h *ProjectHandler) GetProjectByID(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	projectID, err := strconv.Atoi(vars["id"])
 	if err != nil {
@@ -54,21 +58,34 @@ func (h *ProjectHandler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `DELETE FROM projects WHERE id = $1`
-	result, err := h.db.Exec(context.Background(), query, projectID)
+	query := `
+        SELECT id, name, description, lead_id, created_at 
+        FROM projects 
+        WHERE id = $1`
+
+	var project models.Project
+	err = h.db.QueryRow(context.Background(), query, projectID).Scan(
+		&project.ID,
+		&project.Name,
+		&project.Description,
+		&project.LeadID,
+		&project.CreatedAt,
+	)
+
+	if err == pgx.ErrNoRows {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if result.RowsAffected() == 0 {
-		http.Error(w, "Project not found", http.StatusNotFound)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(project)
 }
 
+// UpdateProject updates an existing project
 func (h *ProjectHandler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	projectID, err := strconv.Atoi(vars["id"])
@@ -109,7 +126,8 @@ func (h *ProjectHandler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(project)
 }
 
-func (h *ProjectHandler) GetProjectTasks(w http.ResponseWriter, r *http.Request) {
+// DeleteProject deletes a project by its ID
+func (h *ProjectHandler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	projectID, err := strconv.Atoi(vars["id"])
 	if err != nil {
@@ -117,45 +135,51 @@ func (h *ProjectHandler) GetProjectTasks(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	query := `
-        SELECT 
-            t.id,
-            t.title,
-            t.description,
-            t.status,
-            t.assigned_to,
-            t.created_at,
-            e.name as assignee_name
-        FROM tasks t
-        LEFT JOIN employees e ON t.assigned_to = e.id
-        WHERE t.project_id = $1
-        ORDER BY t.created_at DESC`
+	query := `DELETE FROM projects WHERE id = $1`
+	result, err := h.db.Exec(context.Background(), query, projectID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-	rows, err := h.db.Query(context.Background(), query, projectID)
+	if result.RowsAffected() == 0 {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// GetAllProjects retrieves all projects
+func (h *ProjectHandler) GetAllProjects(w http.ResponseWriter, r *http.Request) {
+	query := `
+        SELECT id, name, description, lead_id, created_at 
+        FROM projects`
+
+	rows, err := h.db.Query(context.Background(), query)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
-	var tasks []models.Task
+	var projects []models.Project
 	for rows.Next() {
-		var task models.Task
+		var project models.Project
 		err := rows.Scan(
-			&task.ID,
-			&task.Title,
-			&task.Description,
-			&task.Status,
-			&task.AssignedTo,
-			&task.CreatedAt,
+			&project.ID,
+			&project.Name,
+			&project.Description,
+			&project.LeadID,
+			&project.CreatedAt,
 		)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		tasks = append(tasks, task)
+		projects = append(projects, project)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tasks)
+	json.NewEncoder(w).Encode(projects)
 }

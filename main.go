@@ -9,7 +9,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5"
 	"nstorm.com/main-backend/handlers"
-	"nstorm.com/main-backend/ollama"
 )
 
 func main() {
@@ -23,28 +22,38 @@ func main() {
 	defer conn.Close(context.Background())
 
 	// Initialize Ollama client
-	ollamaClient := ollama.NewClient("http://localhost:11434")
+	// ollamaClient := ollama.NewClient("http://localhost:11434")
 	employeeHandler := handlers.NewEmployeeHandler(conn)
 	projectHandler := handlers.NewProjectHandler(conn)
-	llmHandler := handlers.NewLLMHandler(ollamaClient, conn)
+	taskHandler := handlers.NewTaskHandler(conn)
+	// llmHandler := handlers.NewLLMHandler(ollamaClient, conn)
 
 	router := mux.NewRouter()
 
-	// Employee routes
-	router.HandleFunc("/api/employees/tasks", employeeHandler.GetEmployeeTasks).Methods("GET")
-	router.HandleFunc("/api/employees/assign-project", employeeHandler.AssignToProject).Methods("POST")
-	router.HandleFunc("/api/employees/remove-from-project", employeeHandler.RemoveFromProject).Methods("POST")
-	router.HandleFunc("/api/employees/assign-task", employeeHandler.AssignTask).Methods("POST")
-	router.HandleFunc("/api/employees/complete-task", employeeHandler.CompleteTask).Methods("POST")
+	router.HandleFunc("/employees", employeeHandler.GetAllEmployees).Methods("GET")
+	router.HandleFunc("/employees", employeeHandler.CreateEmployee).Methods("POST")
+	router.HandleFunc("/employees/{id}", employeeHandler.GetEmployeeById).Methods("GET")
+	router.HandleFunc("/employees/{id}", employeeHandler.UpdateEmployee).Methods("PUT")
+	router.HandleFunc("/employees/{id}", employeeHandler.DeleteEmployee).Methods("DELETE")
 
-	// Project routes
-	router.HandleFunc("/api/projects", projectHandler.CreateProject).Methods("POST")
-	router.HandleFunc("/api/projects/{id}", projectHandler.DeleteProject).Methods("DELETE")
-	router.HandleFunc("/api/projects/{id}", projectHandler.UpdateProject).Methods("PUT")
-	router.HandleFunc("/api/projects/{id}/tasks", projectHandler.GetProjectTasks).Methods("GET")
+	router.HandleFunc("/employees/{id}/tasks", employeeHandler.GetEmployeeTasks).Methods("GET")
+	router.HandleFunc("/employees/{id}/tasks/{status}", employeeHandler.GetEmployeeTasksByStatus).Methods("GET")
+	router.HandleFunc("/employees/{id}/projects", employeeHandler.GetEmployeeProjects).Methods("GET")
+	router.HandleFunc("/employees/{employeeId}/projects/{projectId}", employeeHandler.AssignEmployeeToProject).Methods("POST")
+	router.HandleFunc("/employees/{employeeId}/projects/{projectId}", employeeHandler.RemoveEmployeeFromProject).Methods("DELETE")
+	router.HandleFunc("/projects/{id}/employees", employeeHandler.GetEmployeesByProject).Methods("GET")
 
-	// LLM routes
-	router.HandleFunc("/api/project/plan", llmHandler.CreateProjectPlan).Methods("POST")
+	router.HandleFunc("/projects", projectHandler.GetAllProjects).Methods("GET")
+	router.HandleFunc("/projects", projectHandler.CreateProject).Methods("POST")
+	router.HandleFunc("/projects/{id}", projectHandler.GetProjectByID).Methods("GET")
+	router.HandleFunc("/projects/{id}", projectHandler.UpdateProject).Methods("PUT")
+	router.HandleFunc("/projects/{id}", projectHandler.DeleteProject).Methods("DELETE")
+
+	router.HandleFunc("/tasks", taskHandler.GetAllTasks).Methods("GET")
+	router.HandleFunc("/tasks", taskHandler.CreateTask).Methods("POST")
+	router.HandleFunc("/tasks/{id}", taskHandler.GetTaskByID).Methods("GET")
+	router.HandleFunc("/tasks/{id}", taskHandler.UpdateTask).Methods("PUT")
+	router.HandleFunc("/tasks/{id}", taskHandler.DeleteTask).Methods("DELETE")
 
 	fmt.Println("Server starting on port 8888...")
 	http.ListenAndServe(":8888", router)

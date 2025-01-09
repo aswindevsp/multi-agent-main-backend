@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
+	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5"
 	"nstorm.com/main-backend/models"
 )
@@ -17,17 +19,78 @@ func NewEmployeeHandler(db *pgx.Conn) *EmployeeHandler {
 	return &EmployeeHandler{db: db}
 }
 
-func (h *EmployeeHandler) GetEmployeeTasks(w http.ResponseWriter, r *http.Request) {
+func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
+	var employee models.Employee
+	if err := json.NewDecoder(r.Body).Decode(&employee); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	query := `
-        SELECT 
-            e.id as employee_id,
-            e.name as employee_name,
-            t.id as task_id,
-            t.title as task_title,
-            t.status as task_status
-        FROM employees e
-        LEFT JOIN tasks t ON e.id = t.assigned_to
-        ORDER BY e.id, t.id`
+        INSERT INTO employees (name, email, role)
+        VALUES ($1, $2, $3)
+        RETURNING id, name, email, role, created_at`
+
+	err := h.db.QueryRow(
+		context.Background(),
+		query,
+		employee.Name,
+		employee.Email,
+		employee.Role,
+	).Scan(
+		&employee.ID,
+		&employee.Name,
+		&employee.Email,
+		&employee.Role,
+		&employee.CreatedAt,
+	)
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(employee)
+}
+
+func (h *EmployeeHandler) GetEmployeeById(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	var employee models.Employee
+	query := `
+        SELECT id, name, email, role, created_at
+        FROM employees
+        WHERE id = $1`
+
+	err = h.db.QueryRow(context.Background(), query, id).Scan(
+		&employee.ID,
+		&employee.Name,
+		&employee.Email,
+		&employee.Role,
+		&employee.CreatedAt,
+	)
+
+	if err == pgx.ErrNoRows {
+		http.Error(w, "Employee not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(employee)
+}
+
+func (h *EmployeeHandler) GetAllEmployees(w http.ResponseWriter, r *http.Request) {
+	query := `
+        SELECT id, name, email, role, created_at
+        FROM employees`
 
 	rows, err := h.db.Query(context.Background(), query)
 	if err != nil {
@@ -36,157 +99,323 @@ func (h *EmployeeHandler) GetEmployeeTasks(w http.ResponseWriter, r *http.Reques
 	}
 	defer rows.Close()
 
-	employeeMap := make(map[int]*models.Employee)
-
+	var employees []models.Employee
 	for rows.Next() {
-		var empID int
-		var empName string
-		var taskID *int
-		var taskTitle, taskStatus *string
-
-		err := rows.Scan(&empID, &empName, &taskID, &taskTitle, &taskStatus)
+		var emp models.Employee
+		err := rows.Scan(
+			&emp.ID,
+			&emp.Name,
+			&emp.Email,
+			&emp.Role,
+			&emp.CreatedAt,
+		)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		if _, exists := employeeMap[empID]; !exists {
-			employeeMap[empID] = &models.Employee{
-				ID:    empID,
-				Name:  empName,
-				Tasks: []models.Task{},
-			}
-		}
-
-		if taskID != nil {
-			task := models.Task{
-				ID:     *taskID,
-				Title:  *taskTitle,
-				Status: *taskStatus,
-			}
-			employeeMap[empID].Tasks = append(employeeMap[empID].Tasks, task)
-		}
-	}
-
-	employees := make([]*models.Employee, 0, len(employeeMap))
-	for _, emp := range employeeMap {
 		employees = append(employees, emp)
 	}
 
 	json.NewEncoder(w).Encode(employees)
 }
 
-func (h *EmployeeHandler) AssignToProject(w http.ResponseWriter, r *http.Request) {
-	var request struct {
-		EmployeeID int `json:"employee_id"`
-		ProjectID  int `json:"project_id"`
+func (h *EmployeeHandler) UpdateEmployee(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+	var employee models.Employee
+	if err := json.NewDecoder(r.Body).Decode(&employee); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	query := `
-        INSERT INTO employee_projects (employee_id, project_id)
-        VALUES ($1, $2)
-        ON CONFLICT DO NOTHING`
+        UPDATE employees
+        SET name = $1, email = $2, role = $3
+        WHERE id = $4
+        RETURNING id, name, email, role, created_at`
 
-	_, err := h.db.Exec(context.Background(), query, request.EmployeeID, request.ProjectID)
+	err = h.db.QueryRow(
+		context.Background(),
+		query,
+		employee.Name,
+		employee.Email,
+		employee.Role,
+		id,
+	).Scan(
+		&employee.ID,
+		&employee.Name,
+		&employee.Email,
+		&employee.Role,
+		&employee.CreatedAt,
+	)
+
+	if err == pgx.ErrNoRows {
+		http.Error(w, "Employee not found", http.StatusNotFound)
+		return
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(employee)
 }
 
-func (h *EmployeeHandler) RemoveFromProject(w http.ResponseWriter, r *http.Request) {
-	var request struct {
-		EmployeeID int `json:"employee_id"`
-		ProjectID  int `json:"project_id"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+func (h *EmployeeHandler) DeleteEmployee(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
 		return
 	}
 
-	query := `
-        DELETE FROM employee_projects 
-        WHERE employee_id = $1 AND project_id = $2`
-
-	result, err := h.db.Exec(context.Background(), query, request.EmployeeID, request.ProjectID)
+	query := `DELETE FROM employees WHERE id = $1`
+	result, err := h.db.Exec(context.Background(), query, id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if result.RowsAffected() == 0 {
-		http.Error(w, "Employee not assigned to project", http.StatusNotFound)
+		http.Error(w, "Employee not found", http.StatusNotFound)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *EmployeeHandler) AssignTask(w http.ResponseWriter, r *http.Request) {
-	var request struct {
-		TaskID     int `json:"task_id"`
-		EmployeeID int `json:"employee_id"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+func (h *EmployeeHandler) GetEmployeeTasks(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	employeeId, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid employee ID", http.StatusBadRequest)
 		return
 	}
 
 	query := `
-        UPDATE tasks 
-        SET assigned_to = $1 
-        WHERE id = $2
-        RETURNING id`
+        SELECT t.id, t.project_id, t.assigned_to, t.title, t.description, t.status, t.created_at
+        FROM tasks t
+        WHERE t.assigned_to = $1`
 
-	var taskID int
-	err := h.db.QueryRow(context.Background(), query, request.EmployeeID, request.TaskID).Scan(&taskID)
+	rows, err := h.db.Query(context.Background(), query, employeeId)
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			http.Error(w, "Task not found", http.StatusNotFound)
-			return
-		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	defer rows.Close()
 
-	w.WriteHeader(http.StatusOK)
-}
-
-func (h *EmployeeHandler) CompleteTask(w http.ResponseWriter, r *http.Request) {
-	var request struct {
-		TaskID int `json:"task_id"`
+	var tasks []models.Task
+	for rows.Next() {
+		var task models.Task
+		err := rows.Scan(
+			&task.ID,
+			&task.ProjectID,
+			&task.AssignedTo,
+			&task.Title,
+			&task.Description,
+			&task.Status,
+			&task.CreatedAt,
+		)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		tasks = append(tasks, task)
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	json.NewEncoder(w).Encode(tasks)
+}
+func (h *EmployeeHandler) GetEmployeeTasksByStatus(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	employeeId, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid employee ID", http.StatusBadRequest)
+		return
+	}
+
+	status := vars["status"]
+	if status == "" {
+		http.Error(w, "Status is required", http.StatusBadRequest)
 		return
 	}
 
 	query := `
-        UPDATE tasks 
-        SET status = 'COMPLETED' 
-        WHERE id = $1
-        RETURNING id`
+        SELECT t.id, t.project_id, t.assigned_to, t.title, t.description, t.status, t.created_at
+        FROM tasks t
+        WHERE t.assigned_to = $1 AND t.status = $2`
 
-	var taskID int
-	err := h.db.QueryRow(context.Background(), query, request.TaskID).Scan(&taskID)
+	rows, err := h.db.Query(context.Background(), query, employeeId, status)
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			http.Error(w, "Task not found", http.StatusNotFound)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var tasks []models.Task
+	for rows.Next() {
+		var task models.Task
+		err := rows.Scan(
+			&task.ID,
+			&task.ProjectID,
+			&task.AssignedTo,
+			&task.Title,
+			&task.Description,
+			&task.Status,
+			&task.CreatedAt,
+		)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		tasks = append(tasks, task)
+	}
+
+	json.NewEncoder(w).Encode(tasks)
+}
+
+func (h *EmployeeHandler) GetEmployeeProjects(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	employeeId, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid employee ID", http.StatusBadRequest)
+		return
+	}
+
+	query := `
+        SELECT p.id, p.name, p.description, p.lead_id, p.created_at
+        FROM projects p
+        JOIN employee_projects ep ON p.id = ep.project_id
+        WHERE ep.employee_id = $1`
+
+	rows, err := h.db.Query(context.Background(), query, employeeId)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var projects []models.Project
+	for rows.Next() {
+		var project models.Project
+		err := rows.Scan(
+			&project.ID,
+			&project.Name,
+			&project.Description,
+			&project.LeadID,
+			&project.CreatedAt,
+		)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		projects = append(projects, project)
+	}
+
+	json.NewEncoder(w).Encode(projects)
+}
+
+func (h *EmployeeHandler) AssignEmployeeToProject(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	employeeId, err := strconv.Atoi(vars["employeeId"])
+	if err != nil {
+		http.Error(w, "Invalid employee ID", http.StatusBadRequest)
+		return
+	}
+
+	projectId, err := strconv.Atoi(vars["projectId"])
+	if err != nil {
+		http.Error(w, "Invalid project ID", http.StatusBadRequest)
+		return
+	}
+
+	query := `
+        INSERT INTO employee_projects (employee_id, project_id)
+        VALUES ($1, $2)
+        ON CONFLICT (employee_id, project_id) DO NOTHING`
+
+	_, err = h.db.Exec(context.Background(), query, employeeId, projectId)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (h *EmployeeHandler) RemoveEmployeeFromProject(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	employeeId, err := strconv.Atoi(vars["employeeId"])
+	if err != nil {
+		http.Error(w, "Invalid employee ID", http.StatusBadRequest)
+		return
+	}
+
+	projectId, err := strconv.Atoi(vars["projectId"])
+	if err != nil {
+		http.Error(w, "Invalid project ID", http.StatusBadRequest)
+		return
+	}
+
+	query := `
+        DELETE FROM employee_projects
+        WHERE employee_id = $1 AND project_id = $2`
+
+	result, err := h.db.Exec(context.Background(), query, employeeId, projectId)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if result.RowsAffected() == 0 {
+		http.Error(w, "Assignment not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *EmployeeHandler) GetEmployeesByProject(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid project ID", http.StatusBadRequest)
+		return
+	}
+
+	query := `
+        SELECT e.id, e.name, e.email, e.role, e.created_at
+        FROM employees e
+        JOIN employee_projects ep ON e.id = ep.employee_id
+        WHERE ep.project_id = $1`
+
+	rows, err := h.db.Query(context.Background(), query, projectId)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var employees []models.Employee
+	for rows.Next() {
+		var emp models.Employee
+		err := rows.Scan(
+			&emp.ID,
+			&emp.Name,
+			&emp.Email,
+			&emp.Role,
+			&emp.CreatedAt,
+		)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		employees = append(employees, emp)
+	}
+
+	json.NewEncoder(w).Encode(employees)
 }

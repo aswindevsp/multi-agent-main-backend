@@ -36,3 +36,11 @@ CREATE TABLE tasks (
 CREATE INDEX idx_tasks_project ON tasks(project_id);
 CREATE INDEX idx_tasks_assigned_to ON tasks(assigned_to);
 CREATE INDEX idx_projects_lead ON projects(lead_id);
+
+
+CREATE TABLE employee_projects (
+    employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+    project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (employee_id, project_id)
+);

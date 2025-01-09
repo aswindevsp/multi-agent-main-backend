@@ -16,7 +16,7 @@ type Employee struct {
 	Role      EmployeeRole `json:"role"`
 	CreatedAt time.Time    `json:"created_at"`
 	Projects  []Project    `json:"projects,omitempty"`
-	Tasks     []Task       `json:"tasks", omitempty`
+	Tasks     []Task       `json:"tasks,omitempty`
 }
 
 type Project struct {
