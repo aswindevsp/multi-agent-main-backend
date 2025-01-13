@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5"
@@ -182,4 +184,122 @@ func (h *ProjectHandler) GetAllProjects(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(projects)
+}
+
+type ChatResponse struct {
+	Status  string           `json:"status"`
+	Message string           `json:"message"`
+	Tasks   []TaskAssignment `json:"tasks"`
+}
+
+type TaskAssignment struct {
+	Task       string `json:"task"`
+	AssignedTo string `json:"assigned_to"`
+}
+
+func (h *ProjectHandler) GenerateAndAssignTasks(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectID, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid project ID", http.StatusBadRequest)
+		return
+	}
+
+	// Read the requirements from request body
+	var req struct {
+		Requirements string `json:"requirements"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Query employees and their skills for the project
+	query := `
+        SELECT e.name, e.skills
+        FROM employees e
+        JOIN employee_projects ep ON e.id = ep.employee_id
+        WHERE ep.project_id = $1`
+
+	rows, err := h.db.Query(context.Background(), query, projectID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	// Build the prompt with employee skills
+	var employeeSkills []string
+	employeeNameMap := make(map[string]int)
+	for rows.Next() {
+		var name string
+		var skills []string
+		if err := rows.Scan(&name, &skills); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		employeeSkills = append(employeeSkills, fmt.Sprintf("%s: %v", name, skills))
+		employeeNameMap[name] = 1
+	}
+
+	// Prepare the prompt
+	prompt := fmt.Sprintf("Project Requirements: %s\nTeam Members and Skills:\n%s",
+		req.Requirements,
+		strings.Join(employeeSkills, "\n"))
+
+	// Send request to chat endpoint
+	chatReq, err := http.NewRequest("POST", "http://localhost:8080/chat",
+		bytes.NewBufferString(fmt.Sprintf(`{"prompt": "%s"}`, prompt)))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	chatReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(chatReq)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	var chatResponse ChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&chatResponse); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Insert tasks into database
+	ctx := context.Background()
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	insertQuery := `
+        INSERT INTO tasks (project_id, title, assigned_to, status)
+        SELECT $1, $2, e.id, 'TODO'
+        FROM employees e
+        WHERE e.name = $3
+        RETURNING id`
+
+	for _, task := range chatResponse.Tasks {
+		var taskID int
+		err := tx.QueryRow(ctx, insertQuery, projectID, task.Task, task.AssignedTo).Scan(&taskID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to insert task: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(chatResponse)
 }
