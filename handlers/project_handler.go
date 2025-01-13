@@ -248,7 +248,7 @@ func (h *ProjectHandler) GenerateAndAssignTasks(w http.ResponseWriter, r *http.R
 		strings.Join(employeeSkills, "\n"))
 
 	// Send request to chat endpoint
-	chatReq, err := http.NewRequest("POST", "http://localhost:8080/chat",
+	chatReq, err := http.NewRequest("POST", "http://localhost:8000/chat",
 		bytes.NewBufferString(fmt.Sprintf(`{"prompt": "%s"}`, prompt)))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
