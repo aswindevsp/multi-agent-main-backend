@@ -11,6 +11,21 @@ import (
 	"nstorm.com/main-backend/handlers"
 )
 
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	// Database connection
 	connectionUrl := "postgres://postgres:example@localhost:5432/multiagent"
@@ -21,11 +36,9 @@ func main() {
 	}
 	defer conn.Close(context.Background())
 
-	// ollamaClient := ollama.NewClient("http://localhost:11434")
 	employeeHandler := handlers.NewEmployeeHandler(conn)
 	projectHandler := handlers.NewProjectHandler(conn)
 	taskHandler := handlers.NewTaskHandler(conn)
-	// llmHandler := handlers.NewLLMHandler(ollamaClient, conn)
 
 	router := mux.NewRouter()
 
@@ -55,7 +68,9 @@ func main() {
 	router.HandleFunc("/tasks/{id}", taskHandler.DeleteTask).Methods("DELETE")
 	router.HandleFunc("/projects/{id}/generate-tasks", projectHandler.GenerateAndAssignTasks).Methods("POST")
 
+	handler := corsMiddleware(router)
+
 	fmt.Println("Server starting on port 8888...")
-	http.ListenAndServe(":8888", router)
+	http.ListenAndServe(":8888", handler)
 
 }
