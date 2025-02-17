@@ -92,8 +92,8 @@ func (h *EmployeeHandler) GetEmployeeById(w http.ResponseWriter, r *http.Request
 
 func (h *EmployeeHandler) GetAllEmployees(w http.ResponseWriter, r *http.Request) {
 	query := `
-        SELECT id, name, email, role, skills, created_at,
-        FROM employees`
+        SELECT id, name, email, role, skills, created_at
+        FROM employees;`
 
 	rows, err := h.db.Query(context.Background(), query)
 	if err != nil {

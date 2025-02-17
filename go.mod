@@ -11,3 +11,8 @@ require (
 	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
 )
+
+require (
+	github.com/felixge/httpsnoop v1.0.3 // indirect
+	github.com/gorilla/handlers v1.5.2 // indirect
+)
