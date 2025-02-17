@@ -1,3 +1,5 @@
+\c postgres
+
 -- Drop existing tables if they exist
 DROP TABLE IF EXISTS tasks;
 DROP TABLE IF EXISTS projects;
