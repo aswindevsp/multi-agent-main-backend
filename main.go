@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"nstorm.com/main-backend/database"
 	"os"
 
 	"github.com/gorilla/mux"
-	"github.com/jackc/pgx/v5"
 	"nstorm.com/main-backend/handlers"
 )
 
@@ -27,11 +27,9 @@ func corsMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
-	// Database connection
-	connectionUrl := "postgres://postgres:example@localhost:5432/multiagent"
-	conn, err := pgx.Connect(context.Background(), connectionUrl)
+	conn, err := database.NewConnection()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
+		fmt.Println(err)
 		os.Exit(1)
 	}
 	defer conn.Close(context.Background())
